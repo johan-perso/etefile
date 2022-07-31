@@ -1,0 +1,19 @@
+{
+  "name": "etefile",
+  "version": "1.0.0",
+  "description": "Etefile est une alternative à HiberFile, permettant d'utiliser Firebase pour l'hébergement des fichiers.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "author": "JohanStickman",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^10.0.0",
+    "express": "^4.17.1",
+    "express-rate-limit": "^6.5.1",
+    "firebase": "^9.9.1",
+    "node-fetch": "2.6.7"
+  }
+}
