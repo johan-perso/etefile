@@ -42,7 +42,7 @@ app.use(express.json());
 // Note : les rates limits ne s'appliquent pas à Firebase
 app.use(require('express-rate-limit')({
 	windowMs: 60 * 1000, // 1 minute
-	max: process.env.ETEFILE_MAX_REQUESTS_BEFORE_RATE_LIMIT,
+	max: process.env.ETEFILE_MAX_REQUESTS_BEFORE_RATE_LIMIT || 150,
 	standardHeaders: true
 }))
 
@@ -65,7 +65,7 @@ function generateText(length, charactersList) {
 // Fonction pour générer un identifiant aléatoire
 async function generateId(){
 	// Générer un code
-	var code = generateText(process.env.ETEFILE_CODE_LENGTH || 8)
+	var code = generateText(process.env.ETEFILE_CODE_LENGTH || 6)
 
 	// Vérifier que le code n'a pas été utilisé
 	const docRef = doc(getFirestore(), "filesList", code);
