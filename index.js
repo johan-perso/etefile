@@ -23,6 +23,7 @@ const storage = getStorage();
 const auth = getAuth(); signInWithEmailAndPassword(auth, process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD)
 .then((userCredential) => {
 	const user = userCredential.user;
+	const server = app.listen(process.env.PORT || process.env.ETEFILE_PORT || 3000, () => { console.log(`Serveur web démarré sur le port ${server.address().port}`) })
 	console.log(`Connecté à l'utilisateur admin : ${user.email}`)
 	checkExpiredFiles()
 })
@@ -37,6 +38,7 @@ const express = require('express');
 const app = express();
 app.disable('x-powered-by');
 app.use(express.json());
+app.use(require('cors')());
 
 // Rate limit
 // Note : les rates limits ne s'appliquent pas à Firebase
@@ -72,14 +74,14 @@ async function generateId(){
 	const docSnap = await getDoc(docRef);
 
 	// Si le code est déjà utilisé, en générer un nouveau
-	if (docSnap.exists()) return generateId()
+	if(docSnap.exists()) return generateId()
 
 	// Sinon, retourner le code
 	else return code
 }
 
-// Fonction pour obtenir un idToken
-async function getIdToken(email, password){
+// Fonction pour obtenir les infos d'un compte
+async function getAccount(email, password){
 	var accountInfo = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${process.env.FIREBASE_API_KEY}`, {
 		method: 'POST',
 		body: JSON.stringify({
@@ -88,7 +90,18 @@ async function getIdToken(email, password){
 			password: password
 		})
 	}).then(res => res.json())
-	return accountInfo.idToken
+	return accountInfo
+}
+
+// Fonction pour obtenir les informations d'un compte à partir de son idToken
+async function getAccountFromIdToken(idToken){
+	var accountInfo = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${process.env.FIREBASE_API_KEY}`, {
+		method: 'POST',
+		body: JSON.stringify({
+			idToken: idToken
+		})
+	}).then(res => res.json())
+	return accountInfo?.users?.[0] || accountInfo
 }
 
 // Vérifier chaque demi-jour que des fichiers n'ont pas expirés
@@ -165,6 +178,57 @@ async function checkExpiredFiles(){
 	})
 };
 
+// Route - se connecter
+app.post('/accounts/login', async (req, res) => {
+	// Récupérer certaines informations
+	var email = req.body.email;
+	var password = req.body.password;
+
+	// Vérifier que l'email et le mot de passe sont corrects
+	if(!email || !password) return res.status(400).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'email/password manquant' }))
+
+	// Obtenir le compte
+	var account = await getAccount(email, password);
+	if(!account?.idToken) return res.status(401).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'User does not exist.' }))
+
+	// Retourner les informations
+	res.set('Content-Type', 'application/json').send(formatJSON({ error: false, token: account?.idToken, userId: account?.localId }))
+})
+
+// Route - obtenir les fichiers uploadés
+app.get('/accounts/:id/files', async (req, res) => {
+	// Récupérer certaines informations
+	var idToken = req.headers.authorization;
+	if(idToken) idToken = idToken.replace('Basic ','')
+
+	// Vérifier que l'email et le mot de passe sont corrects
+	if(!idToken) return res.status(400).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'idToken manquant' }))
+
+	// Obtenir le compte à partir de l'idToken
+	var account = await getAccountFromIdToken(idToken);
+	if(!account?.localId) return res.status(401).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'User does not exist.' }))
+
+	// Obtenir la liste des fichiers
+	var simplifiedListFiles = []
+	var files = await getDocs(collection(getFirestore(), "filesList"));
+	files.forEach(doc => {
+		if(doc.data().owner == account?.localId) simplifiedListFiles.push({
+			hiberfileId: doc.id,
+			filename: doc.data().filename,
+			expire: new Date(doc.data().expire.seconds * 1000),
+		})
+	})
+
+	// Retourner les informations
+	res.set('Content-Type', 'application/json').send(formatJSON({ error: false, files: simplifiedListFiles }))
+})
+
+// Route - obtenir les webhooks
+app.get('/accounts/:id/webhooks', async (req, res) => {
+	// TODO: implémenter cette feature
+	res.set('Content-Type', 'application/json').send(formatJSON({ error: false, webhooks: { newFileUploading: '', newFileUploaded: '', newFileDownloading: '' } }))
+})
+
 // Route - créé un fichier dans la BDD
 app.post('/files/create', async (req, res) => {
 	// Récupérer certaines informations
@@ -173,37 +237,53 @@ app.post('/files/create', async (req, res) => {
 	var email = req.body.email;
 	var password = req.body.password;
 
+	// Ou authentification par idToken
+	var idToken = req.headers.authorization;
+	if(idToken) idToken = idToken.replace('Basic ','')
+
 	// Vérifier la date d'expiration
 	if(expireDate == null) expireDate = new Date(Date.now() + 1000 * 60 * 60 * 24)
 	else expireDate = new Date(Date.now() + 1000 * expireDate)
 
-	// Vérifier les informations
-	if(!fileName) return res.status(400).set('Content-Type', 'text/plain').send(formatJSON({ error: true, message: 'name manquant' }))
-	if(process.env.ETEFILE_CONNECTION_REQUIRED_TO_UPLOAD != "false" && (!email || !password)) return res.status(400).set('Content-Type', 'text/plain').send(formatJSON({ error: true, message: 'email/password manquant' }))
+	// Vérifier que le nom du fichier soit donné
+	if(!fileName) return res.status(400).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'name manquant' }))
 
-	// Si l'email ou le mot de passe n'est pas donné, utiliser les informations du fichier .env
-	if(process.env.ETEFILE_CONNECTION_REQUIRED_TO_UPLOAD == "false" && !email?.length) email = process.env.USER_EMAIL
-	if(process.env.ETEFILE_CONNECTION_REQUIRED_TO_UPLOAD == "false" && !password?.length) password = process.env.USER_PASSWORD
+	// Vérifier l'authentification
+	if(process.env.ETEFILE_CONNECTION_REQUIRED_TO_UPLOAD != "false" && !idToken && !email && !password) return res.status(400).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'email/password ou headers manquant' }))
+	if(process.env.ETEFILE_CONNECTION_REQUIRED_TO_UPLOAD != "false" && !email && password) return res.status(400).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'email manquant' }))
+	if(process.env.ETEFILE_CONNECTION_REQUIRED_TO_UPLOAD != "false" && email && !password) return res.status(400).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'password manquant' }))
 
-	// Obtenir l'idToken
-	var idToken = await getIdToken(email, password);
-	if(!idToken) return res.status(401).set('Content-Type', 'text/plain').send(formatJSON({ error: true, message: 'Authentification incorrecte' }))
+	// Si aucune information n'est donnée, on utilise le fichier .env (uniquement si la connexion est pas requise)
+	if(process.env.ETEFILE_CONNECTION_REQUIRED_TO_UPLOAD == "false" && (!email && !password) || !idToken) email = process.env.USER_EMAIL
+
+	// Vérifier l'idToken
+	var account;
+	if(idToken){
+		var account = await getAccountFromIdToken(idToken);
+		if(!account?.localId) return res.status(401).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'User does not exist.' }))
+	}
+
+	// Obtenir l'idToken 
+	if(!account) account = (await getAccount(email, password));
+	if(!account?.localId) return res.status(401).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'User does not exist.' }))
 
 	// Générer un code identifiant unique
 	var uniqueId = await generateId()
+	uniqueId += `-${fileName.replace(/ /g, '-').replace(/\\\//g, '-').replace(/\//g, '-').substring(0, 64)}`
 
 	// Ajouter le fichier dans la BDD
 	await setDoc(doc(collection(getFirestore(), "filesList"), uniqueId), {
 		filename: fileName,
 		downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${process.env.FIREBASE_STORAGE_BUCKET}/o/etefile%2F${encodeURIComponent(uniqueId)}?alt=media`,
 		expire: expireDate,
-		created: new Date()
+		created: new Date(),
+		owner: account?.localId,
 	});
 
 	// Générer un lien pour le fichier
 	res.set('Content-Type', 'application/json').send(formatJSON({
 		uploadUrls: [`https://firebasestorage.googleapis.com/v0/b/${process.env.FIREBASE_STORAGE_BUCKET}/o?name=etefile/${encodeURIComponent(uniqueId)}`],
-		authorization: `Firebase ${idToken}`,
+		authorization: `Firebase ${account?.idToken || idToken}`,
 		uniqueId: uniqueId,
 		hiberfileId: uniqueId,
 		expire: expireDate,
@@ -220,17 +300,23 @@ app.get('/files/:id', async (req, res) => {
 	var id = req.params.id;
 
 	// Vérifier le code identifiant
-	if(!id) return res.status(400).set('Content-Type', 'text/plain').send(formatJSON({ error: true, message: 'id manquant' }))
+	if(!id) return res.status(400).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'id manquant' }))
 
 	// Obtenir le fichier de la BDD
 	const docRef = doc(getFirestore(), "filesList", id);
 	const docSnap = await getDoc(docRef);
 
 	// Si le fichier n'existe pas, retourner une erreur
-	if(!docSnap.exists()) return res.status(404).set('Content-Type', 'text/plain').send(formatJSON({ error: true, message: 'fichier introuvable' }))
+	if(!docSnap.exists()) return res.status(404).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'fichier introuvable' }))
 
 	// Sinon, retourner les informations du fichier
-	else res.set('Content-Type', 'application/json').send(formatJSON(docSnap.data()))
+	else res.set('Content-Type', 'application/json').send(formatJSON({
+		error: false,
+		created: new Date(docSnap.data().created.seconds * 1000),
+		expire: new Date(docSnap.data().expire.seconds * 1000),
+		filename: docSnap.data().filename,
+		downloadUrl: docSnap.data().downloadUrl
+	}))
 })
 
 // Routes - erreur 404
@@ -240,8 +326,3 @@ app.get('*', async (req, res) => {
 app.post('*', async (req, res) => {
 	res.set('Content-Type', 'application/json').send(formatJSON({ error: true, message: "Route non trouvé" }))
 })
-
-// Démarrer le serveur web
-const server = app.listen(process.env.PORT || process.env.ETEFILE_PORT || 3000, () => {
-    console.log(`Serveur web démarré sur le port ${server.address().port}`);
-});
