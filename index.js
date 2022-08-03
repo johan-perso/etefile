@@ -4,7 +4,7 @@ require('dotenv').config();
 
 // Initialiser Firebase
 var { initializeApp } = require("firebase/app");
-const { getStorage, ref, deleteObject, listAll } = require("firebase/storage");
+const { getStorage, ref, deleteObject, listAll, uploadBytes, getDownloadURL } = require("firebase/storage");
 const { collection, getFirestore, doc, getDoc, getDocs, setDoc, deleteDoc } = require("firebase/firestore");
 const { getAuth, signInWithEmailAndPassword } = require("firebase/auth");
 
@@ -104,6 +104,17 @@ async function getAccountFromIdToken(idToken){
 	return accountInfo?.users?.[0] || accountInfo
 }
 
+// Fonction pour vérifier si un fichier existe ou non
+async function checkFileExists(filePath){
+	var isFileExist;
+	try {
+		isFileExist = await getDownloadURL(ref(storage, filePath))
+	} catch(e) {
+		isFileExist = false
+	}
+	return isFileExist
+}
+
 // Vérifier chaque demi-jour que des fichiers n'ont pas expirés
 setInterval(checkExpiredFiles, 1000 * 60 * 60 * 12)
 
@@ -119,13 +130,27 @@ async function checkExpiredFiles(){
 	// Récupérer la liste des fichiers
 	const allDatabaseFiles = await getDocs(collection(getFirestore(), "filesList"));
 
+	// Obtenir tout les fichiers de Storage
+	var allStorageFiles = await listAll(ref(storage, "etefile"))
+	var simplifiedStoragesFiles = []
+	allStorageFiles.items.forEach((file) => {})
+	for(var i = 0; i < allStorageFiles.items.length; i++){
+		simplifiedStoragesFiles.push(allStorageFiles.items[i])
+	}
+	for(var i = 0; i < allStorageFiles.prefixes.length; i++){
+		var folderFiles = await listAll(ref(storage, allStorageFiles.prefixes[i]))
+		for(var j = 0; j < folderFiles.items.length; j++){
+			simplifiedStoragesFiles.push(folderFiles.items[j])
+		}
+	}
+
 	// Log
 	console.log(`Vérification des fichiers commencée`)
 
 	// Préparer un array qui contiendra la liste des élements restants dans la BDD
 	var remainingDatabaseFiles = []
 
-	// Si la liste est vide, retourner
+	// Vérifier les fichier expirés dans la base de données
 	allDatabaseFiles.forEach((doc) => {
 		// Si le fichier est expiré
 		if(Date.now() > new Date(doc.data().expire.seconds * 1000)){
@@ -136,7 +161,7 @@ async function checkExpiredFiles(){
 			deleteDoc(doc.ref)
 
 			// Si un fichier existe dans Storage, le supprimer
-			deleteObject(ref(storage, `etefile/${doc.id}`))
+			deleteObject(ref(storage, doc.data().filePath))
 			.then(() => { console.log(`Le fichier ${doc.id} a été supprimé de Storage`) })
 			.catch((error) => { console.log(`Impossible de supprimer le fichier ${doc.id} de Storage (peut être pas uploadé?)`) })
 		} else {
@@ -145,27 +170,15 @@ async function checkExpiredFiles(){
 		}
 	})
 
-	// Si le fichier est dans Storage, mais pas la BDD
-	var allStorageFiles = await listAll(ref(storage, "etefile"))
-	allStorageFiles.items.forEach(file => {
-		// Si le fichier est introuvable dans la base de données
-		if(!remainingDatabaseFiles.some(doc => doc.id == file.name)){
-			// Log
-			console.log(`Le fichier ${file.name} est introuvable dans la base de données`)
-
-			// Supprimer le fichier de Storage
-			deleteObject(file)
-			.then(() => { console.log(`Le fichier ${file.name} a été supprimé de Storage`) })
-			.catch((error) => { console.log(`Impossible de supprimer le fichier ${file.name} de Storage`) })
-		}
-	})
-
 	// Si le fichier est dans la BDD, mais pas dans Storage
-	remainingDatabaseFiles.forEach(doc => {
+	remainingDatabaseFiles.forEach(async doc => {
+		// Obtenir le fichier dans Storage (récursivement)
+		var tempFilePath = simplifiedStoragesFiles.find(prefix => prefix.fullPath == doc.data().filePath)
+
 		// Si le fichier est introuvable dans Storage
-		if(!allStorageFiles.items.some(file => file.name == doc.id)){
-			// Si le fichier n'a pas été créé il y a plus d'une heure
-			if(Date.now() < new Date(doc.data().created.seconds * 1000 + 3600000)) return
+		if(!tempFilePath){
+			// Si le fichier n'a pas été créé il y a plus de 12 heures
+			if(Date.now() < new Date(doc.data().created.seconds * 1000) + 1000 * 60 * 60 * 12) return
 
 			// Log
 			console.log(`Le fichier ${doc.id} est introuvable dans Storage`)
@@ -192,20 +205,34 @@ app.post('/accounts/login', async (req, res) => {
 	if(!account?.idToken) return res.status(401).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'User does not exist.' }))
 
 	// Retourner les informations
-	res.set('Content-Type', 'application/json').send(formatJSON({ error: false, token: account?.idToken, userId: account?.localId }))
+	res.set('Content-Type', 'application/json').send(formatJSON({ error: false, token: account?.idToken, userId: account?.localId, email: account?.email, expiresIn: account?.expiresIn}))
 })
 
 // Route - obtenir les fichiers uploadés
-app.get('/accounts/:id/files', async (req, res) => {
-	// Récupérer certaines informations
+app.all('/accounts/:id/files', async (req, res) => {
+	// Récupérer les informations d'authentification
+	var email = req.body.email;
+	var password = req.body.password;
 	var idToken = req.headers.authorization;
 	if(idToken) idToken = idToken.replace('Basic ','')
 
-	// Vérifier que l'email et le mot de passe sont corrects
-	if(!idToken) return res.status(400).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'idToken manquant' }))
+	// Vérifier l'authentification
+	if(process.env.ETEFILE_CONNECTION_REQUIRED_TO_UPLOAD != "false" && !idToken && !email && !password) return res.status(400).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'email/password ou headers manquant' }))
+	if(process.env.ETEFILE_CONNECTION_REQUIRED_TO_UPLOAD != "false" && !email && password) return res.status(400).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'email manquant' }))
+	if(process.env.ETEFILE_CONNECTION_REQUIRED_TO_UPLOAD != "false" && email && !password) return res.status(400).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'password manquant' }))
 
-	// Obtenir le compte à partir de l'idToken
-	var account = await getAccountFromIdToken(idToken);
+	// Si aucune information n'est donnée, on utilise le fichier .env (uniquement si la connexion est pas requise)
+	if(process.env.ETEFILE_CONNECTION_REQUIRED_TO_UPLOAD == "false" && (!email && !password) || !idToken) email = process.env.USER_EMAIL
+
+	// Vérifier l'idToken
+	var account;
+	if(idToken){
+		var account = await getAccountFromIdToken(idToken);
+		if(!account?.localId) return res.status(401).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'User does not exist.' }))
+	}
+
+	// Vérifier l'adresse mail/mdp
+	if(!account) account = (await getAccount(email, password));
 	if(!account?.localId) return res.status(401).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'User does not exist.' }))
 
 	// Obtenir la liste des fichiers
@@ -216,13 +243,14 @@ app.get('/accounts/:id/files', async (req, res) => {
 			hiberfileId: doc.id,
 			filename: doc.data().filename,
 			expire: new Date(doc.data().expire.seconds * 1000),
+			downloadUrl: doc.data().downloadUrl,
 		})
 	})
 
 	// Retourner les informations
 	res.set('Content-Type', 'application/json').send(formatJSON({ error: false, files: simplifiedListFiles }))
 })
-
+// TODO: test le site hiberfile en utilisant l'option pour utiliser etefile sans compte
 // Route - obtenir les webhooks
 app.get('/accounts/:id/webhooks', async (req, res) => {
 	// TODO: implémenter cette feature
@@ -263,26 +291,38 @@ app.post('/files/create', async (req, res) => {
 		if(!account?.localId) return res.status(401).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'User does not exist.' }))
 	}
 
-	// Obtenir l'idToken 
+	// Vérifier l'adresse mail/mdp
 	if(!account) account = (await getAccount(email, password));
 	if(!account?.localId) return res.status(401).set('Content-Type', 'application/json').send(formatJSON({ error: true, message: 'User does not exist.' }))
 
 	// Générer un code identifiant unique
 	var uniqueId = await generateId()
-	uniqueId += `-${fileName.replace(/ /g, '-').replace(/\\\//g, '-').replace(/\//g, '-').substring(0, 64)}`
+
+	// Modifier le nom du fichier
+	fileName = fileName.replace(/ /g, '-').replace(/\\\//g, '-').replace(/\//g, '-').substring(0, 64)
+
+	// Préparer la variable qui contiendra le chemin du fichier
+	var filePath = `etefile/${encodeURIComponent(fileName)}`
+
+	// Si un fichier existe déjà avec ce nom dans Storage, modifier le filePath
+	if(await checkFileExists(filePath)) filePath = `etefile/${uniqueId}/${encodeURIComponent(fileName)}`
 
 	// Ajouter le fichier dans la BDD
 	await setDoc(doc(collection(getFirestore(), "filesList"), uniqueId), {
 		filename: fileName,
-		downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${process.env.FIREBASE_STORAGE_BUCKET}/o/etefile%2F${encodeURIComponent(uniqueId)}?alt=media`,
+		downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${process.env.FIREBASE_STORAGE_BUCKET}/o/${filePath}?alt=media`,
 		expire: expireDate,
 		created: new Date(),
 		owner: account?.localId,
+		filePath: filePath
 	});
+
+	// Créer un fichier vierge dans Storage avec une certaine métadonnée à l'emplacement
+	await uploadBytes(ref(storage, filePath), new Uint8Array([1]), { customMetadata: { uploaded: false } });
 
 	// Générer un lien pour le fichier
 	res.set('Content-Type', 'application/json').send(formatJSON({
-		uploadUrls: [`https://firebasestorage.googleapis.com/v0/b/${process.env.FIREBASE_STORAGE_BUCKET}/o?name=etefile/${encodeURIComponent(uniqueId)}`],
+		uploadUrls: [`https://firebasestorage.googleapis.com/v0/b/${process.env.FIREBASE_STORAGE_BUCKET}/o?name=${filePath}`],
 		authorization: `Firebase ${account?.idToken || idToken}`,
 		uniqueId: uniqueId,
 		hiberfileId: uniqueId,
