@@ -5,6 +5,21 @@ EteFile est une alternative à l'API d'[HiberFile](https://github.com/HiberFile/
 [HiberCLI](https://github.com/johan-perso/hibercli) est compatible avec l'API d'EteFile, et un fork du site d'[HiberFile](https://github.com/HiberFile/hiberfile) pour supporter EteFile est prévu.
 
 
+## Roadmap
+
+**[API](https://api.hiberfile.com/documentation) :**
+
+[ ] /accounts/signup
+[ ] /accounts/change-password
+[ ] /accounts/reset-password
+[ ] /accounts/delete
+
+**Feature :**
+
+[ ] Supporter les webhooks utilisateur
+[ ] Supporter les webhooks par fichier
+
+
 ## Prérequis (self-host)
 
 * [nodejs v14+ et npm](https://nodejs.org) installé.
