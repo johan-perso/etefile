@@ -312,7 +312,7 @@ app.post('/files/create', async (req, res) => {
 	// Ajouter le fichier dans la BDD
 	await setDoc(doc(collection(getFirestore(), "filesList"), uniqueId), {
 		filename: fileName,
-		downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${process.env.FIREBASE_STORAGE_BUCKET}/o/${filePath}?alt=media`,
+		downloadUrl: `https://firebasestorage.googleapis.com/v0/b/${process.env.FIREBASE_STORAGE_BUCKET}/o/${filePath.replace(/\//g, '%2F')}?alt=media`,
 		expire: expireDate,
 		created: new Date(),
 		owner: account?.localId,
