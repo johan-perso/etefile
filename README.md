@@ -9,15 +9,15 @@ EteFile est une alternative à l'API d'[HiberFile](https://github.com/HiberFile/
 
 **[API](https://api.hiberfile.com/documentation) :**
 
-[ ] /accounts/signup
-[ ] /accounts/change-password
-[ ] /accounts/reset-password
-[ ] /accounts/delete
+* [ ] /accounts/signup
+* [ ] /accounts/change-password
+* [ ] /accounts/reset-password
+* [ ] /accounts/delete
 
 **Feature :**
 
-[ ] Supporter les webhooks utilisateur
-[ ] Supporter les webhooks par fichier
+* [ ] Supporter les webhooks utilisateur
+* [ ] Supporter les webhooks par fichier
 
 
 ## Prérequis (self-host)
