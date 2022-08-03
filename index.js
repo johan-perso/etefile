@@ -223,6 +223,7 @@ app.all('/accounts/:id/files', async (req, res) => {
 
 	// Si aucune information n'est donnée, on utilise le fichier .env (uniquement si la connexion est pas requise)
 	if(process.env.ETEFILE_CONNECTION_REQUIRED_TO_UPLOAD == "false" && (!email && !password) || !idToken) email = process.env.USER_EMAIL
+	if(process.env.ETEFILE_CONNECTION_REQUIRED_TO_UPLOAD == "false" && (!email && !password) || !idToken) password = process.env.USER_PASSWORD
 
 	// Vérifier l'idToken
 	var account;
@@ -250,7 +251,7 @@ app.all('/accounts/:id/files', async (req, res) => {
 	// Retourner les informations
 	res.set('Content-Type', 'application/json').send(formatJSON({ error: false, files: simplifiedListFiles }))
 })
-// TODO: test le site hiberfile en utilisant l'option pour utiliser etefile sans compte
+
 // Route - obtenir les webhooks
 app.get('/accounts/:id/webhooks', async (req, res) => {
 	// TODO: implémenter cette feature
@@ -283,6 +284,7 @@ app.post('/files/create', async (req, res) => {
 
 	// Si aucune information n'est donnée, on utilise le fichier .env (uniquement si la connexion est pas requise)
 	if(process.env.ETEFILE_CONNECTION_REQUIRED_TO_UPLOAD == "false" && (!email && !password) || !idToken) email = process.env.USER_EMAIL
+	if(process.env.ETEFILE_CONNECTION_REQUIRED_TO_UPLOAD == "false" && (!email && !password) || !idToken) password = process.env.USER_PASSWORD
 
 	// Vérifier l'idToken
 	var account;
