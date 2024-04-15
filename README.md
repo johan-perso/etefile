@@ -1,3 +1,7 @@
+> [!WARNING]  
+> Ce projet n'est plus maintenu, si vous souhaitez héberger un service de transferts de fichiers, jetez un coup d'oeil à mon projet [Stend](https://stend.johanstick.fr/) !
+
+
 # EteFile
 
 EteFile est une alternative à l'API d'[HiberFile](https://github.com/HiberFile/HiberAPI) en utilisant un fonctionnement similaire pour une meilleure compatibilité. Comparé à l'API originale, Firebase est utilisé pour l'hébergement des fichiers et de la base de données.
@@ -46,6 +50,6 @@ Le wiki est disponible [ici](https://github.com/johan-perso/etefile-api/wiki).
 
 ## Licence
 
-MIT © [Johan](https://johanstickman.com)
+MIT © [Johan](https://johanstick.fr)
 
 Non affilié avec HiberFile.
